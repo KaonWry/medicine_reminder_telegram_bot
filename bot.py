@@ -1,25 +1,44 @@
-import logging
-import os
-import sqlite3
-import re
-from dotenv import load_dotenv
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler
+import logging  # For logging bot activity
+import os  # For file path and environment variable access
+import sqlite3  # For SQLite database operations
+import re  # For regex validation of reminder time
+from dotenv import load_dotenv  # For loading environment variables from .env
+from telegram import Update  # Telegram update object
+from telegram.ext import (
+    ApplicationBuilder,
+    ContextTypes,
+    CommandHandler,
+)  # Bot framework
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")  # Path to SQLite DB
 
 
 def add_reminder_to_db(user_id: int, time: str, name: str):
+    """
+    Add a reminder to the database for a specific user.
+    Args:
+        user_id (int): Telegram user ID
+        time (str): Reminder time in HH:MM format
+        name (str): Reminder name
+    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
         "INSERT INTO reminders (user_id, time, name) VALUES (?, ?, ?)",
-        (user_id, time, name)
+        (user_id, time, name),
     )
     conn.commit()
     conn.close()
 
+
 def get_reminders_for_user(user_id: int):
+    """
+    Retrieve all reminders for a given user.
+    Args:
+        user_id (int): Telegram user ID
+    Returns:
+        list of (time, name) tuples
+    """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -28,8 +47,18 @@ def get_reminders_for_user(user_id: int):
     reminders = cursor.fetchall()
     conn.close()
     return reminders
+
+
 async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id if update.effective_user and hasattr(update.effective_user, "id") else None
+    """
+    Telegram command handler for /list.
+    Lists all reminders for the requesting user.
+    """
+    user_id = (
+        update.effective_user.id
+        if update.effective_user and hasattr(update.effective_user, "id")
+        else None
+    )
     if user_id is None or not update.message:
         if update.message:
             await update.message.reply_text("Could not determine user id.")
@@ -41,13 +70,19 @@ async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = "Your reminders:\n" + "\n".join([f"{t} - {n}" for t, n in reminders])
     await update.message.reply_text(msg)
 
-load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+load_dotenv()  # Load environment variables from .env file
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot token
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)
+)  # Set up logging
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Telegram command handler for /start.
+    Sends onboarding instructions to the user.
+    """
     chat_id = update.effective_chat.id if update.effective_chat else None
     if chat_id:
         msg = (
@@ -58,37 +93,49 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await context.bot.send_message(chat_id=chat_id, text=msg)
 
+
 async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Telegram command handler for /add.
+    Adds a new reminder for the user if the format is valid.
+    """
     args = context.args if context.args else []
     if len(args) < 2 or not update.message:
         if update.message:
-            await update.message.reply_text("Usage: /add <reminder time> <reminder name>")
+            await update.message.reply_text(
+                "Usage: /add <reminder time> <reminder name>"
+            )
         return
     time = args[0]
-    name = " ".join(args[1:])
+    name = " ".join(args[1:])  # All text after time is the reminder name
     # Regex: HH:MM (24-hour) and at least one non-space character for name
     if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time) or not name.strip():
         await update.message.reply_text(
             "Invalid format. Usage: /add <reminder time> <reminder name>\nExample: /add 20:00 Medicine"
         )
         return
-    user_id = update.effective_user.id if update.effective_user and hasattr(update.effective_user, "id") else None
+    user_id = (
+        update.effective_user.id
+        if update.effective_user and hasattr(update.effective_user, "id")
+        else None
+    )
     if user_id is None:
         await update.message.reply_text("Could not determine user id.")
         return
     add_reminder_to_db(user_id, time, name)
-    await update.message.reply_text(
-        f'Ok, I\'ll remind you at {time} for "{name}".'
-    )
+    await update.message.reply_text(f'Ok, I\'ll remind you at {time} for "{name}".')
+
 
 if __name__ == "__main__":
+    # Entry point for running the bot
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN not set in environment.")
     application = ApplicationBuilder().token(BOT_TOKEN).build()
+    # Register command handlers
     start_handler = CommandHandler("start", start)
     add_handler = CommandHandler("add", add)
     list_handler = CommandHandler("list", list_reminders)
     application.add_handler(start_handler)
     application.add_handler(add_handler)
     application.add_handler(list_handler)
-    application.run_polling()
+    application.run_polling()  # Start polling for updates

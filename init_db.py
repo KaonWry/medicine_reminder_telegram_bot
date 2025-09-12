@@ -3,11 +3,12 @@ import os
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
 
+
 def init_db():
-	conn = sqlite3.connect(DB_PATH)
-	cursor = conn.cursor()
-	cursor.execute(
-		"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        """
 		CREATE TABLE IF NOT EXISTS reminders (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			user_id INTEGER NOT NULL,
@@ -15,9 +16,10 @@ def init_db():
 			time TEXT NOT NULL
 		)
 		"""
-	)
-	conn.commit()
-	conn.close()
+    )
+    conn.commit()
+    conn.close()
+
 
 if __name__ == "__main__":
-	init_db()
+    init_db()
