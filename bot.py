@@ -4,11 +4,24 @@ import sqlite3  # For SQLite database operations
 import re  # For regex validation of reminder time
 from dotenv import load_dotenv  # For loading environment variables from .env
 from telegram import Update  # Telegram update object
+from apscheduler.schedulers.background import BackgroundScheduler  # For scheduled jobs
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
 )  # Bot framework
+
+
+def reset_reminders_triggered():
+    """
+    Reset the triggered_today flag for all reminders to 0.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE reminders SET triggered_today = 0")
+    conn.commit()
+    conn.close()
+
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")  # Path to SQLite DB
 
@@ -29,6 +42,7 @@ def add_reminder_to_db(user_id: int, time: str, name: str):
     )
     conn.commit()
     conn.close()
+    logging.info(f"User {user_id} added reminder: '{name}' at {time}")
 
 
 def get_reminders_for_user(user_id: int):
@@ -112,6 +126,7 @@ async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     conn.commit()
     conn.close()
     await update.message.reply_text(f"Deleted reminder {idx}: {t} - {n}")
+    logging.info(f"User {user_id} deleted reminder {idx}: '{n}' at {t}")
 
 
 load_dotenv()  # Load environment variables from .env file
@@ -187,4 +202,10 @@ if __name__ == "__main__":
     application.add_handler(add_handler)
     application.add_handler(list_handler)
     application.add_handler(delete_handler)
+
+    # Schedule daily reset of triggered_today at midnight
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(reset_reminders_triggered, "cron", hour=0, minute=0)
+    scheduler.start()
+
     application.run_polling()  # Start polling for updates
