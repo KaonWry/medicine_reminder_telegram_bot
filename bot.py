@@ -129,10 +129,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id if update.effective_chat else None
     if chat_id:
         msg = (
-            "Welcome to the Medicine Reminder Bot!\n"
-            "Use /add <reminder time> <reminder name> to set a reminder.\n"
-            "Example: /add 20:00 Medicine\n"
-            "The bot will store your reminders and notify you at the specified time."
+            "Welcome to the Medicine Reminder Bot!\n\n"
+            "Available commands:\n"
+            "/add <reminder time> <reminder name> - Add a new reminder.\n"
+            "    Example: /add 20:00 Medicine\n"
+            "/list - List all your reminders, numbered for deletion.\n"
+            "/delete <number> - Delete a reminder by its number from /list.\n"
+            "    Example: /delete 1\n"
+            "\nThe bot will store your reminders and notify you at the specified time."
         )
         await context.bot.send_message(chat_id=chat_id, text=msg)
 
