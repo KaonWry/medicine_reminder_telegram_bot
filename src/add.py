@@ -30,11 +30,13 @@ async def add_reminder_to_db(update, context):
                 "Usage: /add <reminder time> <reminder name>"
             )
         return
-    time = args[0]
-    name = " ".join(args[1:])  # All text after time is the reminder name
+    time_raw = args[0]
+    # Accept dot or colon, normalize to colon
+    time = time_raw.replace(".", ":")
+    name = " ".join(args[1:])
     if not is_valid_time_format(time) or not name.strip():
         await update.message.reply_text(
-            "Invalid format. Usage: /add <reminder time> <reminder name>\nExample: /add 20:00 Medicine"
+            "Invalid format. Usage: /add <reminder time> <reminder name>\nExample: /add 20:00 Medicine or /add 20.00 Medicine"
         )
         return
     user_id = get_user_id(update)
@@ -82,7 +84,7 @@ async def add_start(update, context):
     if not update.message:
         return ConversationHandler.END
     await update.message.reply_text(
-        "Please type the time you want to be reminded in (HH:MM, 24-hour format):"
+        "Please type the time you want to be reminded in (HH:MM or HH.MM, 24-hour format):"
     )
     return ADD_TIME
 
@@ -96,13 +98,14 @@ async def add_time(update, context):
     Returns:
         Next conversation state or END
     """
-    time = get_message_text(update)
-    if time is None:
+    time_raw = get_message_text(update)
+    if time_raw is None:
         return ConversationHandler.END
+    time = time_raw.replace(".", ":")
     if not is_valid_time_format(time):
         if update.message:
             await update.message.reply_text(
-                "Invalid time format. Please type the time in HH:MM (24-hour format):"
+                "Invalid time format. Please type the time in HH:MM or HH.MM (24-hour format):"
             )
         return ADD_TIME
     user_data = get_user_data(context)
