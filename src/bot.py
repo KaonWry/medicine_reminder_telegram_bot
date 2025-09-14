@@ -2,14 +2,12 @@ import logging  # For logging bot activity
 import os  # For file path and environment variable access
 import sqlite3  # For SQLite database operations
 from dotenv import load_dotenv  # For loading environment variables from .env
-from datetime import datetime, timedelta, timezone # Time handling
+from datetime import datetime, timedelta, timezone  # Time handling
 from apscheduler.schedulers.background import BackgroundScheduler  # For scheduled jobs
-from telegram import Update  # Telegram update object
 
 # Bot framework
 from telegram.ext import (
     ApplicationBuilder,
-    ContextTypes,
     CommandHandler,
     filters,
 )
@@ -62,11 +60,11 @@ def reset_reminders_triggered():
     conn.close()
 
 
-def reset_reminder(tz_offset = 7):
+def reset_reminder(tz_offset=7):
     """Reset reminders at local midnight.
     Args:
         tz_offset (int): timezone offset in hours (default 7 for UTC+7)
-    Returns: 
+    Returns:
         None
     """
     tz = timezone(timedelta(hours=tz_offset))
@@ -132,6 +130,59 @@ async def list_reminders(update, context):
     await update.message.reply_text(msg)
 
 
+# Reminder due check and notification
+def get_due_reminders(tz_offset=7):
+    """
+    Check the database for reminders due at or before the current local time and update their triggered_today flag.
+    Returns a list of (user_id, name, time) for reminders due now or missed during downtime.
+    Args:
+        tz_offset (int): timezone offset in hours (default 7 for UTC+7)
+    Returns:
+        list of (user_id, name, time) tuples for due reminders
+    """
+    from datetime import datetime, timezone, timedelta
+
+    now_utc = datetime.now(timezone.utc)
+    tz = timezone(timedelta(hours=tz_offset))
+    local_time = now_utc.astimezone(tz)
+    current_time_str = local_time.strftime("%H:%M")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    # Select reminders where time <= current_time_str and not triggered today
+    cursor.execute(
+        "SELECT id, user_id, name, time FROM reminders WHERE time <= ? AND triggered_today = 0",
+        (current_time_str,)
+    )
+    due_reminders = cursor.fetchall()
+    # Mark these reminders as triggered
+    for rem_id, user_id, name, time in due_reminders:
+        cursor.execute(
+            "UPDATE reminders SET triggered_today = 1 WHERE id = ?", (rem_id,)
+        )
+    conn.commit()
+    conn.close()
+    return [(user_id, name, time) for _, user_id, name, time in due_reminders]
+
+
+async def poll_due_reminders(application, tz_offset=7):
+    """
+    Poll for due reminders and send messages to users.
+    Args:
+        application: Telegram application object
+        tz_offset (int): timezone offset in hours (default 7 for UTC+7)
+    Returns:
+        None
+    """
+    due = get_due_reminders(tz_offset)
+    for user_id, name, time in due:
+        try:
+            await application.bot.send_message(
+                chat_id=user_id, text=f"You have a reminder for '{name}' at {time}."
+            )
+        except Exception as e:
+            logging.error(f"Failed to send reminder to user {user_id}: {e}")
+
+
 if __name__ == "__main__":
     # Check for BOT_TOKEN
     if not BOT_TOKEN:
@@ -152,10 +203,28 @@ if __name__ == "__main__":
         CommandHandler("delete", delete_reminder, filters=filters.Regex(r"^/delete .+"))
     )
 
-    # Schedule daily reset of triggered_today at local midnight (UTC+7)
+    # Schedule a single job to check both midnight reset and due reminders every minute
+    def scheduled_job():
+        reset_reminder()  # Will only reset at local midnight
+        due = get_due_reminders()
+        import asyncio
+
+        async def send_all():
+            for user_id, name, time in due:
+                try:
+                    await application.bot.send_message(
+                        chat_id=user_id,
+                        text=f"You have a reminder for '{name}' at {time}.",
+                    )
+                except Exception as e:
+                    logging.error(f"Failed to send reminder to user {user_id}: {e}")
+
+        if due:
+            asyncio.run(send_all())
+
     scheduler = BackgroundScheduler()
-    scheduler.add_job(reset_reminder, "cron", minute="*") # Run every minute, but only reset at local midnight
+    scheduler.add_job(scheduled_job, "cron", minute="*")
     scheduler.start()
-    
+
     # Start the bot
     application.run_polling()

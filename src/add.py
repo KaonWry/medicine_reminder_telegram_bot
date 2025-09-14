@@ -1,4 +1,7 @@
+import sqlite3
+import logging
 from telegram.ext import CommandHandler, MessageHandler, filters, ConversationHandler
+from datetime import datetime, timezone, timedelta
 from helpers import (
     is_valid_time_format,
     get_user_data,
@@ -6,9 +9,6 @@ from helpers import (
     get_message_text,
     get_reminders_for_user,
 )
-import sqlite3
-import logging
-from telegram.ext import ConversationHandler
 
 ADD_TIME, ADD_NAME = range(2)
 
@@ -53,9 +53,14 @@ async def add_reminder_to_db(update, context):
             f"You already have a reminder named '{name}'. Please choose a different name."
         )
         return
+    tz = timezone(timedelta(hours=7))
+    now_utc = datetime.now(timezone.utc)
+    local_time = now_utc.astimezone(tz)
+    current_time_str = local_time.strftime("%H:%M")
+    triggered_today = 1 if time <= current_time_str else 0
     cursor.execute(
-        "INSERT INTO reminders (user_id, time, name) VALUES (?, ?, ?)",
-        (user_id, time, name),
+        "INSERT INTO reminders (user_id, time, name, triggered_today) VALUES (?, ?, ?, ?)",
+        (user_id, time, name, triggered_today),
     )
     conn.commit()
     conn.close()
@@ -110,7 +115,7 @@ async def add_time(update, context):
 async def add_name(update, context):
     """
     Handles the user's input for the reminder name.
-    
+
     Args:
         update: Telegram update object
         context: Telegram context object
@@ -150,6 +155,7 @@ async def add_cancel(update, context):
     if update.message:
         await update.message.reply_text("Reminder creation cancelled.")
     return ConversationHandler.END
+
 
 # Conversation handler for adding reminders
 add_conv_handler = ConversationHandler(
