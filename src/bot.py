@@ -1,47 +1,42 @@
 import logging  # For logging bot activity
 import os  # For file path and environment variable access
 import sqlite3  # For SQLite database operations
-import pathlib  # For project root path
 from dotenv import load_dotenv  # For loading environment variables from .env
-from telegram import Update  # Telegram update object
 from apscheduler.schedulers.background import BackgroundScheduler  # For scheduled jobs
+from telegram import Update  # Telegram update object
+
+# Bot framework
 from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
-    ConversationHandler,
-    MessageHandler,
     filters,
-)  # Bot framework
+)
+
+# Helper functions
 from helpers import (
     get_user_id,
     get_reminders_for_user,
-)  # Helper functions
+    ROOT_PATH,
+    DB_PATH,
+)
+
+# /add command handler
 from add import (
     add_reminder_to_db,
-    add_start,
-    add_time,
-    add_name,
-    add_cancel,
-)  # /add command handler
+    add_conv_handler,
+)
+
+# /delete command handler
 from delete import (
     delete_reminder,
-    delete_start,
-    delete_choose,
-    delete_cancel,
-)  # /delete command handler
+    delete_conv_handler,
+)
 
-# Path to SQLite DB
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.resolve()
-DB_PATH = os.path.join(PROJECT_ROOT, "src", "reminders.db")
-
-# States for ConversationHandler
-ADD_TIME, ADD_NAME = range(2)
-DELETE_CHOOSE = 0
 
 # Environment and Logging
 load_dotenv(
-    dotenv_path=os.path.join(PROJECT_ROOT, ".env")
+    dotenv_path=os.path.join(ROOT_PATH, ".env")
 )  # Load environment variables from .env in project root
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot token
 logging.basicConfig(
@@ -74,6 +69,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = (
             "Welcome to the Medicine Reminder Bot!\n\n"
             "Available commands:\n"
+            "/start - Show this help message.\n"
             "/add <reminder time> <reminder name> - Add a new reminder.\n"
             "    Example: /add 20:00 Medicine\n"
             "/list - List all your reminders, numbered for deletion.\n"
@@ -115,29 +111,6 @@ if __name__ == "__main__":
     # Register command handlers
     start_handler = CommandHandler("start", start)
     list_handler = CommandHandler("list", list_reminders)
-
-    # Conversation handlers for /add and /delete accessibility
-    add_conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("add", add_start, filters=filters.Regex(r"^/add$"))
-        ],
-        states={
-            ADD_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_time)],
-            ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_name)],
-        },
-        fallbacks=[CommandHandler("cancel", add_cancel)],
-    )
-    delete_conv_handler = ConversationHandler(
-        entry_points=[
-            CommandHandler("delete", delete_start, filters=filters.Regex(r"^/delete$"))
-        ],
-        states={
-            DELETE_CHOOSE: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, delete_choose)
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", delete_cancel)],
-    )
 
     # Register ConversationHandlers BEFORE regular CommandHandlers for /add and /delete
     application.add_handler(add_conv_handler)

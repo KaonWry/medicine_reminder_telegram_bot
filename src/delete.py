@@ -1,3 +1,4 @@
+from telegram.ext import CommandHandler, MessageHandler, filters, ConversationHandler
 from helpers import get_user_data, get_user_id, get_message_text, get_reminders_for_user
 import sqlite3
 import logging
@@ -104,3 +105,14 @@ async def delete_cancel(update, context):
     if update.message:
         await update.message.reply_text("Reminder deletion cancelled.")
     return ConversationHandler.END
+
+
+delete_conv_handler = ConversationHandler(
+    entry_points=[
+        CommandHandler("delete", delete_start, filters=filters.Regex(r"^/delete$"))
+    ],
+    states={
+        DELETE_CHOOSE: [MessageHandler(filters.TEXT & ~filters.COMMAND, delete_choose)],
+    },
+    fallbacks=[CommandHandler("cancel", delete_cancel)],
+)

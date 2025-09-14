@@ -1,3 +1,4 @@
+from telegram.ext import CommandHandler, MessageHandler, filters, ConversationHandler
 from helpers import (
     is_valid_time_format,
     get_user_data,
@@ -110,3 +111,13 @@ async def add_cancel(update, context):
     if update.message:
         await update.message.reply_text("Reminder creation cancelled.")
     return ConversationHandler.END
+
+
+add_conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("add", add_start, filters=filters.Regex(r"^/add$"))],
+    states={
+        ADD_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_time)],
+        ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_name)],
+    },
+    fallbacks=[CommandHandler("cancel", add_cancel)],
+)

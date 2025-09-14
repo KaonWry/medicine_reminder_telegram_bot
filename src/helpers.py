@@ -4,8 +4,9 @@ from telegram import Update
 import os
 import pathlib
 
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent.resolve()
-DB_PATH = os.path.join(PROJECT_ROOT, "src", "reminders.db")
+
+ROOT_PATH = pathlib.Path(__file__).parent.parent.resolve()
+DB_PATH = os.path.join(ROOT_PATH, "src", "reminders.db")
 
 
 def is_valid_time_format(time_str):
