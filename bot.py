@@ -9,7 +9,41 @@ from telegram.ext import (
     ApplicationBuilder,
     ContextTypes,
     CommandHandler,
+    ConversationHandler,
+    MessageHandler,
+    filters,
 )  # Bot framework
+
+# Path to SQLite DB
+DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
+# States for ConversationHandler
+ADD_TIME, ADD_NAME = range(2)
+DELETE_CHOOSE = 0
+# Environment and Logging
+load_dotenv()  # Load environment variables from .env file
+BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot token
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)  # Set up logging
+
+
+# Helper Functions
+def get_user_data(context):
+    """
+    Safely get or initialize context.user_data as a dict.
+    """
+    if not hasattr(context, "user_data") or context.user_data is None:
+        context.user_data = {}
+    return context.user_data
+
+
+def get_user_id(update: Update):
+    """
+    Safely extract the Telegram user ID from an update.
+    Returns None if not available.
+    """
+    user = getattr(update, "effective_user", None)
+    return getattr(user, "id", None)
 
 
 def reset_reminders_triggered():
@@ -23,19 +57,196 @@ def reset_reminders_triggered():
     conn.close()
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")  # Path to SQLite DB
+def get_message_text(update):
+    """
+    Safely get the text from update.message, or None if not available.
+    """
+    if (
+        not update.message
+        or not hasattr(update.message, "text")
+        or update.message.text is None
+    ):
+        return None
+    return update.message.text.strip()
 
 
-def add_reminder_to_db(user_id: int, time: str, name: str):
-    """
-    Add a reminder to the database for a specific user.
-    Args:
-        user_id (int): Telegram user ID
-        time (str): Reminder time in HH:MM format
-        name (str): Reminder name
-    """
+# Conversation Handlers
+async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        return ConversationHandler.END
+    await update.message.reply_text(
+        "Please type the time you want to be reminded in (HH:MM, 24-hour format):"
+    )
+    return ADD_TIME
+
+
+async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    time = get_message_text(update)
+    if time is None:
+        return ConversationHandler.END
+    if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time):
+        if update.message:
+            await update.message.reply_text(
+                "Invalid time format. Please type the time in HH:MM (24-hour format):"
+            )
+        return ADD_TIME
+    user_data = get_user_data(context)
+    user_data["add_time"] = time
+    if update.message:
+        await update.message.reply_text("What is the reminder about?")
+    return ADD_NAME
+
+
+async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    name = get_message_text(update)
+    if name is None:
+        return ConversationHandler.END
+    user_data = get_user_data(context)
+    time = user_data.get("add_time")
+    user_id = get_user_id(update)
+    if not name:
+        if update.message:
+            await update.message.reply_text(
+                "Reminder name cannot be empty. Please type the reminder:"
+            )
+        return ADD_NAME
+    if user_id is None or time is None:
+        if update.message:
+            await update.message.reply_text("Could not determine user id or time.")
+        return ConversationHandler.END
+    context.args = [time, name]
+    await add_reminder_to_db(update, context)
+    return ConversationHandler.END
+
+
+async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message:
+        await update.message.reply_text("Reminder creation cancelled.")
+    return ConversationHandler.END
+
+
+async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = get_user_id(update)
+    if user_id is None:
+        if update.message:
+            await update.message.reply_text("Could not determine user id.")
+        return ConversationHandler.END
+    reminders = get_reminders_for_user(user_id)
+    if not reminders:
+        if update.message:
+            await update.message.reply_text("You have no reminders set.")
+        return ConversationHandler.END
+    msg_lines = ["Your reminders:"]
+    for idx, (rem_id, t, n) in enumerate(reminders, 1):
+        msg_lines.append(f"{idx}. {t} - {n}")
+    msg_lines.append("\nPlease type the number of the reminder you want to delete:")
+    msg = "\n".join(msg_lines)
+    user_data = get_user_data(context)
+    user_data["reminders"] = reminders
+    if update.message:
+        await update.message.reply_text(msg)
+    return DELETE_CHOOSE
+
+
+async def delete_choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = get_user_id(update)
+    user_data = get_user_data(context)
+    reminders = user_data.get("reminders", [])
+    text = get_message_text(update)
+    if text is None:
+        return ConversationHandler.END
+    if not text.isdigit():
+        if update.message:
+            await update.message.reply_text("Please type a valid number.")
+        return DELETE_CHOOSE
+    idx = int(text)
+    if idx < 1 or idx > len(reminders):
+        if update.message:
+            await update.message.reply_text(
+                f"Invalid number. You have {len(reminders)} reminders."
+            )
+        return DELETE_CHOOSE
+    rem_id, t, n = reminders[idx - 1]
+    if user_id is None:
+        if update.message:
+            await update.message.reply_text("Could not determine user id.")
+        return ConversationHandler.END
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute(
+        "DELETE FROM reminders WHERE id = ? AND user_id = ?", (rem_id, user_id)
+    )
+    conn.commit()
+    conn.close()
+    if update.message:
+        await update.message.reply_text(f"Deleted reminder {idx}: {t} - {n}")
+    logging.info(f"User {user_id} deleted reminder {idx}: '{n}' at {t}")
+    return ConversationHandler.END
+
+
+async def delete_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.message:
+        await update.message.reply_text("Reminder deletion cancelled.")
+    return ConversationHandler.END
+
+
+# Command Handlers
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Telegram command handler for /start.
+    Sends onboarding instructions to the user.
+    """
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    if chat_id:
+        msg = (
+            "Welcome to the Medicine Reminder Bot!\n\n"
+            "Available commands:\n"
+            "/add <reminder time> <reminder name> - Add a new reminder.\n"
+            "    Example: /add 20:00 Medicine\n"
+            "/list - List all your reminders, numbered for deletion.\n"
+            "/delete <number> - Delete a reminder by its number from /list.\n"
+            "    Example: /delete 1\n"
+            "\nThe bot will store your reminders and notify you at the specified time."
+        )
+        await context.bot.send_message(chat_id=chat_id, text=msg)
+
+
+async def add_reminder_to_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Telegram command handler for /add.
+    Adds a new reminder for the user if the format is valid.
+    """
+    args = context.args if context.args else []
+    if len(args) < 2 or not update.message:
+        if update.message:
+            await update.message.reply_text(
+                "Usage: /add <reminder time> <reminder name>"
+            )
+        return
+    time = args[0]
+    name = " ".join(args[1:])  # All text after time is the reminder name
+    # Regex: HH:MM (24-hour) and at least one non-space character for name
+    if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time) or not name.strip():
+        await update.message.reply_text(
+            "Invalid format. Usage: /add <reminder time> <reminder name>\nExample: /add 20:00 Medicine"
+        )
+        return
+    user_id = get_user_id(update)
+    if user_id is None:
+        await update.message.reply_text("Could not determine user id.")
+        return
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT 1 FROM reminders WHERE user_id = ? AND name = ?",
+        (user_id, name),
+    )
+    if cursor.fetchone():
+        conn.close()
+        await update.message.reply_text(
+            f"You already have a reminder named '{name}'. Please choose a different name."
+        )
+        return
     cursor.execute(
         "INSERT INTO reminders (user_id, time, name) VALUES (?, ?, ?)",
         (user_id, time, name),
@@ -43,6 +254,8 @@ def add_reminder_to_db(user_id: int, time: str, name: str):
     conn.commit()
     conn.close()
     logging.info(f"User {user_id} added reminder: '{name}' at {time}")
+    await update.message.reply_text(f'Ok, I\'ll remind you at {time} for "{name}".')
+    return
 
 
 def get_reminders_for_user(user_id: int):
@@ -69,11 +282,7 @@ async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Telegram command handler for /list.
     Lists all reminders for the requesting user, numbered for deletion.
     """
-    user_id = (
-        update.effective_user.id
-        if update.effective_user and hasattr(update.effective_user, "id")
-        else None
-    )
+    user_id = get_user_id(update)
     if user_id is None or not update.message:
         if update.message:
             await update.message.reply_text("Could not determine user id.")
@@ -94,11 +303,7 @@ async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     Telegram command handler for /delete <number>.
     Deletes the user's reminder at the given index.
     """
-    user_id = (
-        update.effective_user.id
-        if update.effective_user and hasattr(update.effective_user, "id")
-        else None
-    )
+    user_id = get_user_id(update)
     if user_id is None or not update.message:
         if update.message:
             await update.message.reply_text("Could not determine user id.")
@@ -129,65 +334,6 @@ async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logging.info(f"User {user_id} deleted reminder {idx}: '{n}' at {t}")
 
 
-load_dotenv()  # Load environment variables from .env file
-BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot token
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)  # Set up logging
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Telegram command handler for /start.
-    Sends onboarding instructions to the user.
-    """
-    chat_id = update.effective_chat.id if update.effective_chat else None
-    if chat_id:
-        msg = (
-            "Welcome to the Medicine Reminder Bot!\n\n"
-            "Available commands:\n"
-            "/add <reminder time> <reminder name> - Add a new reminder.\n"
-            "    Example: /add 20:00 Medicine\n"
-            "/list - List all your reminders, numbered for deletion.\n"
-            "/delete <number> - Delete a reminder by its number from /list.\n"
-            "    Example: /delete 1\n"
-            "\nThe bot will store your reminders and notify you at the specified time."
-        )
-        await context.bot.send_message(chat_id=chat_id, text=msg)
-
-
-async def add(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """
-    Telegram command handler for /add.
-    Adds a new reminder for the user if the format is valid.
-    """
-    args = context.args if context.args else []
-    if len(args) < 2 or not update.message:
-        if update.message:
-            await update.message.reply_text(
-                "Usage: /add <reminder time> <reminder name>"
-            )
-        return
-    time = args[0]
-    name = " ".join(args[1:])  # All text after time is the reminder name
-    # Regex: HH:MM (24-hour) and at least one non-space character for name
-    if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time) or not name.strip():
-        await update.message.reply_text(
-            "Invalid format. Usage: /add <reminder time> <reminder name>\nExample: /add 20:00 Medicine"
-        )
-        return
-    user_id = (
-        update.effective_user.id
-        if update.effective_user and hasattr(update.effective_user, "id")
-        else None
-    )
-    if user_id is None:
-        await update.message.reply_text("Could not determine user id.")
-        return
-    add_reminder_to_db(user_id, time, name)
-    await update.message.reply_text(f'Ok, I\'ll remind you at {time} for "{name}".')
-
-
 if __name__ == "__main__":
     # Entry point for running the bot
     if not BOT_TOKEN:
@@ -195,14 +341,40 @@ if __name__ == "__main__":
     application = ApplicationBuilder().token(BOT_TOKEN).build()
     # Register command handlers
     start_handler = CommandHandler("start", start)
-    add_handler = CommandHandler("add", add)
     list_handler = CommandHandler("list", list_reminders)
-    delete_handler = CommandHandler("delete", delete_reminder)
+    # Conversation handlers for /add and /delete accessibility
+    add_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("add", add_start, filters=filters.Regex(r"^/add$"))
+        ],
+        states={
+            ADD_TIME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_time)],
+            ADD_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_name)],
+        },
+        fallbacks=[CommandHandler("cancel", add_cancel)],
+    )
+    delete_conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("delete", delete_start, filters=filters.Regex(r"^/delete$"))
+        ],
+        states={
+            DELETE_CHOOSE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, delete_choose)
+            ],
+        },
+        fallbacks=[CommandHandler("cancel", delete_cancel)],
+    )
+    # Register ConversationHandlers BEFORE regular CommandHandlers for /add and /delete
+    application.add_handler(add_conv_handler)
+    application.add_handler(delete_conv_handler)
     application.add_handler(start_handler)
-    application.add_handler(add_handler)
     application.add_handler(list_handler)
-    application.add_handler(delete_handler)
-
+    application.add_handler(
+        CommandHandler("add", add_reminder_to_db, filters=filters.Regex(r"^/add .+"))
+    )
+    application.add_handler(
+        CommandHandler("delete", delete_reminder, filters=filters.Regex(r"^/delete .+"))
+    )
     # Schedule daily reset of triggered_today at midnight
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_reminders_triggered, "cron", hour=0, minute=0)
