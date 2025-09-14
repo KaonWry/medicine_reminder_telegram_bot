@@ -16,21 +16,32 @@ from telegram.ext import (
 
 # Path to SQLite DB
 DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
+
 # States for ConversationHandler
 ADD_TIME, ADD_NAME = range(2)
 DELETE_CHOOSE = 0
+
 # Environment and Logging
 load_dotenv()  # Load environment variables from .env file
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot token
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
-)  # Set up logging
+)
 
 
 # Helper Functions
+def is_valid_time_format(time_str):
+    """
+    Validate time string against HH:MM 24-hour format.
+    Returns True if valid, False otherwise.
+    """
+    return bool(re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time_str))
+
+
 def get_user_data(context):
     """
     Safely get or initialize context.user_data as a dict.
+    Used to store per-user state in conversation flows.
     """
     if not hasattr(context, "user_data") or context.user_data is None:
         context.user_data = {}
@@ -39,7 +50,7 @@ def get_user_data(context):
 
 def get_user_id(update: Update):
     """
-    Safely extract the Telegram user ID from an update.
+    Extract the Telegram user ID from an update object.
     Returns None if not available.
     """
     user = getattr(update, "effective_user", None)
@@ -48,7 +59,8 @@ def get_user_id(update: Update):
 
 def reset_reminders_triggered():
     """
-    Reset the triggered_today flag for all reminders to 0.
+    Reset the triggered_today flag for all reminders to 0 in the database.
+    Called daily by APScheduler to allow reminders to trigger again.
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -60,6 +72,7 @@ def reset_reminders_triggered():
 def get_message_text(update):
     """
     Safely get the text from update.message, or None if not available.
+    Used for extracting user input in conversation flows.
     """
     if (
         not update.message
@@ -72,6 +85,10 @@ def get_message_text(update):
 
 # Conversation Handlers
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation entry for /add (no arguments).
+    Prompts user for reminder time.
+    """
     if not update.message:
         return ConversationHandler.END
     await update.message.reply_text(
@@ -81,10 +98,13 @@ async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation step for /add: receives time, validates format, prompts for name.
+    """
     time = get_message_text(update)
     if time is None:
         return ConversationHandler.END
-    if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time):
+    if not is_valid_time_format(time):
         if update.message:
             await update.message.reply_text(
                 "Invalid time format. Please type the time in HH:MM (24-hour format):"
@@ -98,6 +118,9 @@ async def add_time(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation step for /add: receives reminder name, validates, adds to DB.
+    """
     name = get_message_text(update)
     if name is None:
         return ConversationHandler.END
@@ -120,12 +143,19 @@ async def add_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def add_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation fallback for /add: cancels reminder creation.
+    """
     if update.message:
         await update.message.reply_text("Reminder creation cancelled.")
     return ConversationHandler.END
 
 
 async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation entry for /delete (no arguments).
+    Prompts user to choose a reminder to delete.
+    """
     user_id = get_user_id(update)
     if user_id is None:
         if update.message:
@@ -149,6 +179,9 @@ async def delete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def delete_choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation step for /delete: receives reminder number, deletes from DB.
+    """
     user_id = get_user_id(update)
     user_data = get_user_data(context)
     reminders = user_data.get("reminders", [])
@@ -185,6 +218,9 @@ async def delete_choose(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def delete_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """
+    Conversation fallback for /delete: cancels reminder deletion.
+    """
     if update.message:
         await update.message.reply_text("Reminder deletion cancelled.")
     return ConversationHandler.END
@@ -213,8 +249,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def add_reminder_to_db(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """
-    Telegram command handler for /add.
-    Adds a new reminder for the user if the format is valid.
+    Telegram command handler for /add <reminder time> <reminder name>.
+    Validates input, checks for duplicates, inserts reminder in DB.
     """
     args = context.args if context.args else []
     if len(args) < 2 or not update.message:
@@ -225,8 +261,7 @@ async def add_reminder_to_db(update: Update, context: ContextTypes.DEFAULT_TYPE)
         return
     time = args[0]
     name = " ".join(args[1:])  # All text after time is the reminder name
-    # Regex: HH:MM (24-hour) and at least one non-space character for name
-    if not re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time) or not name.strip():
+    if not is_valid_time_format(time) or not name.strip():
         await update.message.reply_text(
             "Invalid format. Usage: /add <reminder time> <reminder name>\nExample: /add 20:00 Medicine"
         )
@@ -335,13 +370,21 @@ async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 if __name__ == "__main__":
-    # Entry point for running the bot
+    """
+    Main entry point for running the Telegram reminder bot.
+    - Initializes the bot application
+    - Registers all command and conversation handlers
+    - Schedules daily reset of reminder flags
+    - Starts polling for updates
+    """
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN not set in environment.")
     application = ApplicationBuilder().token(BOT_TOKEN).build()
+
     # Register command handlers
     start_handler = CommandHandler("start", start)
     list_handler = CommandHandler("list", list_reminders)
+
     # Conversation handlers for /add and /delete accessibility
     add_conv_handler = ConversationHandler(
         entry_points=[
@@ -364,6 +407,7 @@ if __name__ == "__main__":
         },
         fallbacks=[CommandHandler("cancel", delete_cancel)],
     )
+
     # Register ConversationHandlers BEFORE regular CommandHandlers for /add and /delete
     application.add_handler(add_conv_handler)
     application.add_handler(delete_conv_handler)
@@ -375,6 +419,7 @@ if __name__ == "__main__":
     application.add_handler(
         CommandHandler("delete", delete_reminder, filters=filters.Regex(r"^/delete .+"))
     )
+
     # Schedule daily reset of triggered_today at midnight
     scheduler = BackgroundScheduler()
     scheduler.add_job(reset_reminders_triggered, "cron", hour=0, minute=0)
