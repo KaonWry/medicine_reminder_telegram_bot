@@ -17,6 +17,11 @@ async def add_reminder_to_db(update, context):
     """
     Add a reminder to the database.
     Usage: /add <reminder time> <reminder name>
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        None
     """
     args = context.args if context.args else []
     if len(args) < 2 or not update.message:
@@ -60,6 +65,15 @@ async def add_reminder_to_db(update, context):
 
 
 async def add_start(update, context):
+    """
+    Start the conversation to add a reminder.
+    Asks the user for the reminder time.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        Conversation state or END
+    """
     if not update.message:
         return ConversationHandler.END
     await update.message.reply_text(
@@ -69,6 +83,14 @@ async def add_start(update, context):
 
 
 async def add_time(update, context):
+    """
+    Handles the user's input for the reminder time.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        Next conversation state or END
+    """
     time = get_message_text(update)
     if time is None:
         return ConversationHandler.END
@@ -86,6 +108,15 @@ async def add_time(update, context):
 
 
 async def add_name(update, context):
+    """
+    Handles the user's input for the reminder name.
+    
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        Next conversation state or END
+    """
     name = get_message_text(update)
     if name is None:
         return ConversationHandler.END
@@ -108,11 +139,19 @@ async def add_name(update, context):
 
 
 async def add_cancel(update, context):
+    """
+    Cancel the add reminder conversation.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        None
+    """
     if update.message:
         await update.message.reply_text("Reminder creation cancelled.")
     return ConversationHandler.END
 
-
+# Conversation handler for adding reminders
 add_conv_handler = ConversationHandler(
     entry_points=[CommandHandler("add", add_start, filters=filters.Regex(r"^/add$"))],
     states={

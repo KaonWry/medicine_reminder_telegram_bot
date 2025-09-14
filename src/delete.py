@@ -11,6 +11,11 @@ async def delete_reminder(update, context):
     """
     Delete a reminder from the database.
     Usage: /delete <number>
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        None
     """
     user_id = get_user_id(update)
     if user_id is None or not update.message:
@@ -43,6 +48,15 @@ async def delete_reminder(update, context):
 
 
 async def delete_start(update, context):
+    """
+    Start the delete reminder conversation.
+    Lists reminders and prompts user to choose one to delete.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        Next conversation state or END
+    """
     user_id = get_user_id(update)
     if user_id is None:
         if update.message:
@@ -66,6 +80,14 @@ async def delete_start(update, context):
 
 
 async def delete_choose(update, context):
+    """
+    Prompts the user to choose a reminder to delete.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        Next conversation state or END
+    """
     user_id = get_user_id(update)
     user_data = get_user_data(context)
     reminders = user_data.get("reminders", [])
@@ -102,6 +124,14 @@ async def delete_choose(update, context):
 
 
 async def delete_cancel(update, context):
+    """
+    Cancels the delete reminder conversation.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        None
+    """
     if update.message:
         await update.message.reply_text("Reminder deletion cancelled.")
     return ConversationHandler.END

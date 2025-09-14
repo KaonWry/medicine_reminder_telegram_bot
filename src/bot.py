@@ -2,6 +2,7 @@ import logging  # For logging bot activity
 import os  # For file path and environment variable access
 import sqlite3  # For SQLite database operations
 from dotenv import load_dotenv  # For loading environment variables from .env
+from datetime import datetime, timedelta, timezone # Time handling
 from apscheduler.schedulers.background import BackgroundScheduler  # For scheduled jobs
 from telegram import Update  # Telegram update object
 
@@ -49,6 +50,10 @@ def reset_reminders_triggered():
     """
     Reset the triggered_today flag for all reminders to 0 in the database.
     Called daily by APScheduler to allow reminders to trigger again.
+    Args:
+        None
+    Returns:
+        None
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -57,12 +62,32 @@ def reset_reminders_triggered():
     conn.close()
 
 
+def reset_reminder(tz_offset = 7):
+    """Reset reminders at local midnight.
+    Args:
+        tz_offset (int): timezone offset in hours (default 7 for UTC+7)
+    Returns: 
+        None
+    """
+    tz = timezone(timedelta(hours=tz_offset))
+    now_utc = datetime.now(timezone.utc)
+    local_time = now_utc.astimezone(tz)
+    # Only run at local midnight
+    if local_time.hour == 0 and local_time.minute == 0:
+        reset_reminders_triggered()
+
+
 # Command Handlers
 # /start
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update, context):
     """
     Telegram command handler for /start.
     Sends onboarding instructions to the user.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        None
     """
     chat_id = update.effective_chat.id if update.effective_chat else None
     if chat_id:
@@ -81,10 +106,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # /list
-async def list_reminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def list_reminders(update, context):
     """
     Telegram command handler for /list.
     Lists all reminders for the requesting user, numbered for deletion.
+    Args:
+        update: Telegram update object
+        context: Telegram context object
+    Returns:
+        None
     """
     user_id = get_user_id(update)
     if user_id is None or not update.message:
@@ -110,13 +140,11 @@ if __name__ == "__main__":
 
     # Register command handlers
     start_handler = CommandHandler("start", start)
+    application.add_handler(start_handler)
     list_handler = CommandHandler("list", list_reminders)
-
-    # Register ConversationHandlers BEFORE regular CommandHandlers for /add and /delete
+    application.add_handler(list_handler)
     application.add_handler(add_conv_handler)
     application.add_handler(delete_conv_handler)
-    application.add_handler(start_handler)
-    application.add_handler(list_handler)
     application.add_handler(
         CommandHandler("add", add_reminder_to_db, filters=filters.Regex(r"^/add .+"))
     )
@@ -124,9 +152,10 @@ if __name__ == "__main__":
         CommandHandler("delete", delete_reminder, filters=filters.Regex(r"^/delete .+"))
     )
 
-    # Schedule daily reset of triggered_today at midnight
+    # Schedule daily reset of triggered_today at local midnight (UTC+7)
     scheduler = BackgroundScheduler()
-    scheduler.add_job(reset_reminders_triggered, "cron", hour=0, minute=0)
+    scheduler.add_job(reset_reminder, "cron", minute="*") # Run every minute, but only reset at local midnight
     scheduler.start()
-
-    application.run_polling()  # Start polling for updates
+    
+    # Start the bot
+    application.run_polling()

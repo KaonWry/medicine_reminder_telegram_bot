@@ -13,6 +13,10 @@ def is_valid_time_format(time_str):
     """
     Validate time string against HH:MM 24-hour format.
     Returns True if valid, False otherwise.
+    Args:
+        time_str (str): Time string to validate
+    Returns:
+        bool: True if valid, False otherwise
     """
     return bool(re.match(r"^(?:[01]\d|2[0-3]):[0-5]\d$", time_str))
 
@@ -21,6 +25,10 @@ def get_user_data(context):
     """
     Safely get or initialize context.user_data as a dict.
     Used to store per-user state in conversation flows.
+    Args:
+        context: Telegram context object
+    Returns:
+        dict: user_data dictionary
     """
     if not hasattr(context, "user_data") or context.user_data is None:
         context.user_data = {}
@@ -31,6 +39,10 @@ def get_user_id(update: Update):
     """
     Extract the Telegram user ID from an update object.
     Returns None if not available.
+    Args:
+        update: Telegram update object
+    Returns:
+        int: Telegram user ID or None
     """
     user = getattr(update, "effective_user", None)
     return getattr(user, "id", None)
@@ -40,6 +52,10 @@ def get_message_text(update):
     """
     Safely get the text from update.message, or None if not available.
     Used for extracting user input in conversation flows.
+    Args:
+        update: Telegram update object
+    Returns:
+        str: message text or None
     """
     if (
         not update.message
