@@ -2,6 +2,7 @@ import logging  # For logging bot activity
 import os  # For file path and environment variable access
 import sqlite3  # For SQLite database operations
 import re  # For regex validation of reminder time
+import pathlib # For project root path
 from dotenv import load_dotenv  # For loading environment variables from .env
 from telegram import Update  # Telegram update object
 from apscheduler.schedulers.background import BackgroundScheduler  # For scheduled jobs
@@ -15,19 +16,19 @@ from telegram.ext import (
 )  # Bot framework
 
 # Path to SQLite DB
-DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
+PROJECT_ROOT = pathlib.Path(__file__).parent.parent.resolve()
+DB_PATH = os.path.join(PROJECT_ROOT, "src", "reminders.db")
 
 # States for ConversationHandler
 ADD_TIME, ADD_NAME = range(2)
 DELETE_CHOOSE = 0
 
 # Environment and Logging
-load_dotenv()  # Load environment variables from .env file
+load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, ".env"))  # Load environment variables from .env in project root
 BOT_TOKEN = os.getenv("BOT_TOKEN")  # Telegram bot token
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-
 
 # Helper Functions
 def is_valid_time_format(time_str):
@@ -81,7 +82,6 @@ def get_message_text(update):
     ):
         return None
     return update.message.text.strip()
-
 
 # Conversation Handlers
 async def add_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -224,7 +224,6 @@ async def delete_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text("Reminder deletion cancelled.")
     return ConversationHandler.END
-
 
 # Command Handlers
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -370,13 +369,7 @@ async def delete_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 if __name__ == "__main__":
-    """
-    Main entry point for running the Telegram reminder bot.
-    - Initializes the bot application
-    - Registers all command and conversation handlers
-    - Schedules daily reset of reminder flags
-    - Starts polling for updates
-    """
+    # Check for BOT_TOKEN
     if not BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN not set in environment.")
     application = ApplicationBuilder().token(BOT_TOKEN).build()

@@ -1,8 +1,9 @@
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "reminders.db")
-
+# Always create DB in /src
+db_dir = os.path.dirname(__file__)
+DB_PATH = os.path.join(db_dir, "reminders.db")
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -18,7 +19,8 @@ def init_db():
         )
         """
     )
-
+    conn.commit()
+    conn.close()
 
 if __name__ == "__main__":
     init_db()
