@@ -5,6 +5,7 @@ import os
 db_dir = os.path.dirname(__file__)
 DB_PATH = os.path.join(db_dir, "reminders.db")
 
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -21,6 +22,7 @@ def init_db():
     )
     conn.commit()
     conn.close()
+
 
 if __name__ == "__main__":
     init_db()
